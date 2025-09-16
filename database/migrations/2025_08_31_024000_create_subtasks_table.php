@@ -19,6 +19,7 @@ return new class extends Migration
             $table->decimal('estimated_hours', 5, 2)->nullable();
             $table->decimal('actual_hours', 5, 2)->nullable();
             $table->integer('position')->default(1);
+             $table->text('reject_reason')->nullable();
             $table->timestamp('created_at')->useCurrent();
 
             // Foreign key
