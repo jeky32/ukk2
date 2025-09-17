@@ -6,9 +6,9 @@ use App\Models\Card;
 use App\Models\Board;
 use App\Models\CardAssignment;
 use App\Models\User;
-use App\Models\TimeLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 class CardController extends Controller
 {
@@ -21,7 +21,7 @@ class CardController extends Controller
             abort(403, 'Hanya Team Lead yang bisa melihat daftar card');
         }
 
-        $cards = Card::with('assignments.user')
+        $cards = Card::with(['assignments.user', 'subtasks'])
             ->where('board_id', $board->board_id)
             ->get();
 
@@ -39,59 +39,75 @@ class CardController extends Controller
     }
 
     /**
-     * Simpan card baru
+     * Simpan card baru + assign user (hanya 1)
      */
-    public function store(Request $request, Board $board)
-    {
-        if (Auth::user()->role !== 'team_lead') abort(403);
+   public function store(Request $request, Board $board)
+{
+    if (Auth::user()->role !== 'team_lead') abort(403);
 
-        $request->validate([
-            'card_title'      => 'required|string|max:255',
-            'description'     => 'nullable|string',
-            'priority'        => 'required|in:low,medium,high',
-            'estimated_hours' => 'nullable|numeric|min:0',
-            'due_date'        => 'nullable|date|after_or_equal:today',
-            'usernames'       => 'required|string'
+    $request->validate([
+        'card_title'      => 'required|string|max:255',
+        'description'     => 'nullable|string',
+        'priority'        => 'required|in:low,medium,high',
+        'estimated_hours' => 'nullable|numeric|min:0',
+        'due_date'        => 'nullable|date|after_or_equal:today',
+        'username'        => 'required|string'
+    ]);
+
+    // 🔹 Cari user dulu
+    $user = User::where('username', $request->username)
+        ->whereIn('role', ['developer', 'designer'])
+        ->first();
+
+    if (!$user) {
+        throw ValidationException::withMessages([
+            'username' => "❌ Username {$request->username} tidak valid atau bukan developer/designer.",
         ]);
-
-        $lastPosition = Card::where('board_id', $board->board_id)->max('position');
-        $position = $lastPosition ? $lastPosition + 1 : 1;
-
-        $card = Card::create([
-            'board_id'        => $board->board_id,
-            'card_title'      => $request->card_title,
-            'description'     => $request->description,
-            'priority'        => $request->priority,
-            'estimated_hours' => $request->estimated_hours,
-            'due_date'        => $request->due_date,
-            'status'          => 'todo',
-            'position'        => $position,
-            'created_by'      => Auth::id(),
-        ]);
-
-        // Multiple assignment
-        $usernames = array_map('trim', explode(',', $request->usernames));
-        foreach ($usernames as $username) {
-            $user = User::where('username', $username)
-                ->whereIn('role', ['developer', 'designer'])
-                ->first();
-
-            if ($user) {
-                CardAssignment::create([
-                    'card_id'          => $card->card_id,
-                    'user_id'          => $user->user_id,
-                    'assignment_status'=> 'assigned',
-                    'assigned_at'      => now()
-                ]);
-            }
-        }
-
-        return redirect()->route('teamlead.cards.index', $board)
-            ->with('success', '✅ Card berhasil dibuat & ditugaskan!');
     }
 
+    // 🔹 Cek apakah user masih pegang card aktif
+    $hasActiveCard = CardAssignment::where('user_id', $user->user_id)
+        ->whereHas('card', function ($q) {
+            $q->whereIn('status', ['todo', 'in_progress', 'review']);
+        })
+        ->exists();
+
+    if ($hasActiveCard) {
+        throw ValidationException::withMessages([
+            'username' => "❌ User {$user->username} sedang ada tugas lain. Selesaikan dulu sebelum ambil card baru.",
+        ]);
+    }
+
+    // ✅ Kalau lolos, baru buat card
+    $lastPosition = Card::where('board_id', $board->board_id)->max('position');
+    $position = $lastPosition ? $lastPosition + 1 : 1;
+
+    $card = Card::create([
+        'board_id'        => $board->board_id,
+        'card_title'      => $request->card_title,
+        'description'     => $request->description,
+        'priority'        => $request->priority,
+        'estimated_hours' => $request->estimated_hours,
+        'due_date'        => $request->due_date,
+        'status'          => 'todo',
+        'position'        => $position,
+        'created_by'      => Auth::id(),
+    ]);
+
+    // 🔹 Assign user ke card
+    CardAssignment::create([
+        'card_id'          => $card->card_id,
+        'user_id'          => $user->user_id,
+        'assignment_status'=> 'assigned',
+        'assigned_at'      => now()
+    ]);
+
+    return redirect()->route('teamlead.cards.index', $board)
+        ->with('success', '✅ Card berhasil dibuat & ditugaskan!');
+}
+
     /**
-     * Edit card
+     * Form edit card
      */
     public function edit(Board $board, Card $card)
     {
@@ -102,7 +118,7 @@ class CardController extends Controller
     }
 
     /**
-     * Update card
+     * Update card (hanya 1 user)
      */
     public function update(Request $request, Board $board, Card $card)
     {
@@ -114,7 +130,7 @@ class CardController extends Controller
             'priority'        => 'required|in:low,medium,high',
             'estimated_hours' => 'nullable|numeric|min:0',
             'due_date'        => 'nullable|date|after_or_equal:today',
-            'usernames'       => 'required|string'
+            'username'        => 'required|string'
         ]);
 
         $card->update([
@@ -125,24 +141,34 @@ class CardController extends Controller
             'due_date'        => $request->due_date,
         ]);
 
-        // hapus assignment lama
+        // Hapus assignment lama
         CardAssignment::where('card_id', $card->card_id)->delete();
 
-        // tambah assignment baru
-        $usernames = array_map('trim', explode(',', $request->usernames));
-        foreach ($usernames as $username) {
-            $user = User::where('username', $username)
-                ->whereIn('role', ['developer', 'designer'])
-                ->first();
+        // Tambah assignment baru
+        $user = User::where('username', $request->username)
+            ->whereIn('role', ['developer', 'designer'])
+            ->first();
 
-            if ($user) {
-                CardAssignment::create([
-                    'card_id'          => $card->card_id,
-                    'user_id'          => $user->user_id,
-                    'assignment_status'=> 'assigned',
-                    'assigned_at'      => now()
+        if ($user) {
+            $hasActiveCard = CardAssignment::where('user_id', $user->user_id)
+                ->where('card_id', '!=', $card->card_id)
+                ->whereHas('card', function ($q) {
+                    $q->whereIn('status', ['todo', 'in_progress', 'review']);
+                })
+                ->exists();
+
+            if ($hasActiveCard) {
+                throw ValidationException::withMessages([
+                    'username' => "❌ User {$user->username} sedang ada tugas lain. Selesaikan dulu sebelum ambil card baru.",
                 ]);
             }
+
+            CardAssignment::create([
+                'card_id'          => $card->card_id,
+                'user_id'          => $user->user_id,
+                'assignment_status'=> 'assigned',
+                'assigned_at'      => now()
+            ]);
         }
 
         return redirect()->route('teamlead.cards.index', $board)
@@ -160,6 +186,4 @@ class CardController extends Controller
         return redirect()->route('teamlead.cards.index', $board)
             ->with('success', '🗑️ Card berhasil dihapus!');
     }
-
-    
 }

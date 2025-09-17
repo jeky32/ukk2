@@ -48,6 +48,11 @@ Route::middleware(['auth','role:team_lead'])->group(function () {
     // Delete
     Route::delete('/teamlead/boards/{board}/cards/{card}', [CardController::class, 'destroy'])
         ->name('teamlead.cards.destroy');
+
+    Route::post('/subtasks/{subtask}/approve', [SubtaskController::class, 'approve'])->name('subtasks.approve');
+    Route::post('/subtasks/{subtask}/reject', [SubtaskController::class, 'reject'])
+    ->name('subtasks.reject');
+
 });
    /*
 |--------------------------------------------------------------------------
@@ -59,8 +64,13 @@ Route::middleware(['auth','role:developer,designer'])->group(function() {
     Route::get('/developer/dashboard', [ProjectController::class, 'developerDashboard'])->name('developer.dashboard');
     Route::get('/designer/dashboard', [ProjectController::class, 'designerDashboard'])->name('designer.dashboard');
 
-    // Subtasks
+     // Halaman buat subtask (create)
+    Route::get('/cards/{card}/subtasks/create', [SubtaskController::class, 'create'])->name('subtasks.create');
+
+    // Simpan subtask
     Route::post('/cards/{card}/subtasks', [SubtaskController::class, 'store'])->name('subtasks.store');
+
+    // Aksi start & complete
     Route::post('/subtasks/{subtask}/start', [SubtaskController::class, 'start'])->name('subtasks.start');
     Route::post('/subtasks/{subtask}/complete', [SubtaskController::class, 'complete'])->name('subtasks.complete');
 });

@@ -90,16 +90,62 @@
 
                 <!-- Aksi -->
                 <td>
-                  <a href="{{ route('teamlead.cards.edit', [$board->board_id, $card->card_id]) }}" 
-                     class="btn btn-sm btn-warning">✏️ Edit</a>
-                  
-                  <form method="POST" action="{{ route('teamlead.cards.destroy', [$board->board_id, $card->card_id]) }}" 
-                        style="display:inline-block">
-                    @csrf
-                    @method('DELETE')
-                    <button type="submit" class="btn btn-sm btn-danger"
-                            onclick="return confirm('Yakin mau hapus card ini?')">🗑️ Hapus</button>
-                  </form>
+                  {{-- Edit & Hapus hanya jika card belum Done --}}
+                  @if($card->status != 'done')
+                    <a href="{{ route('teamlead.cards.edit', [$board->board_id, $card->card_id]) }}" 
+                       class="btn btn-sm btn-warning">✏️ Edit</a>
+                    
+                    <form method="POST" action="{{ route('teamlead.cards.destroy', [$board->board_id, $card->card_id]) }}" 
+                          style="display:inline-block">
+                      @csrf
+                      @method('DELETE')
+                      <button type="submit" class="btn btn-sm btn-danger"
+                              onclick="return confirm('Yakin mau hapus card ini?')">🗑️ Hapus</button>
+                    </form>
+                  @endif
+
+                  {{-- Approve / Reject hanya muncul kalau status = review & ada subtask review --}}
+                  @if($card->status == 'review' && $card->subtasks->where('status', 'review')->count() > 0)
+                    @foreach($card->subtasks->where('status','review') as $subtask)
+                      <form method="POST" action="{{ route('subtasks.approve', $subtask->subtask_id) }}" 
+                            style="display:inline-block">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-success mt-1">
+                          ✅ Approve {{ $subtask->subtask_title }}
+                        </button>
+                      </form>
+
+                      <!-- Tombol Reject buka modal -->
+                      <button type="button" class="btn btn-sm btn-danger mt-1" data-bs-toggle="modal" data-bs-target="#rejectModal{{ $subtask->subtask_id }}">
+                        ❌ Reject {{ $subtask->subtask_title }}
+                      </button>
+
+                      <!-- Modal Reject -->
+                      <div class="modal fade" id="rejectModal{{ $subtask->subtask_id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog">
+                          <form method="POST" action="{{ route('subtasks.reject', $subtask->subtask_id) }}">
+                            @csrf
+                            <div class="modal-content">
+                              <div class="modal-header">
+                                <h5 class="modal-title">❌ Reject Subtask: {{ $subtask->subtask_title }}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                              </div>
+                              <div class="modal-body">
+                                <div class="mb-3">
+                                  <label for="reason" class="form-label">Alasan Reject</label>
+                                  <textarea name="reason" class="form-control" rows="3" required></textarea>
+                                </div>
+                              </div>
+                              <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                                <button type="submit" class="btn btn-danger">❌ Reject</button>
+                              </div>
+                            </div>
+                          </form>
+                        </div>
+                      </div>
+                    @endforeach
+                  @endif
                 </td>
               </tr>
             @empty
